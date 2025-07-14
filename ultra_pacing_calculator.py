@@ -47,6 +47,21 @@ def compute_leg_times_by_pace(legs, target_pace):
         })
     return pacing_plan, total_time/60
 
+def split_into_legs(points, num_legs):
+    total_distance = sum([haversine_distance(points[i], points[i+1]) for i in range(len(points)-1)])
+    leg_dist = total_distance / num_legs
+    legs, current_dist, leg_points = [], 0, [points[0]]
+    for i in range(1, len(points)):
+        segment_dist = haversine_distance(points[i-1], points[i])
+        current_dist += segment_dist
+        leg_points.append(points[i])
+        if current_dist >= leg_dist:
+            legs.append((current_dist, leg_points))
+            current_dist, leg_points = 0, [points[i]]
+    if current_dist > 0:
+        legs.append((current_dist, leg_points))
+    return [(leg[0], None) for leg in legs]
+
 def round_quarter_hour(hours):
     return round((hours * 4 + 0.9999) // 1) / 4
 
@@ -146,20 +161,28 @@ def generate_advanced_training_plan(total_distance, weeks, days_per_week=5, incl
 st.title("Ultra Pacing & Advanced Training Plan")
 
 uploaded_file = st.file_uploader("Upload your GPX file", type=["gpx"])
-total_dist = 0
+legs = []
 
 if uploaded_file is not None:
     gpx = gpxpy.parse(uploaded_file)
-    points = [pt for tr in gpx.tracks for seg in tr.segments for pt in seg.points]
-    total_dist = sum([haversine_distance(points[i], points[i+1]) for i in range(len(points)-1)])
+    segments = [seg for tr in gpx.tracks for seg in tr.segments]
+    if len(segments) > 1:
+        st.success(f"Detected {len(segments)} legs from GPX file.")
+        for seg in segments:
+            dist = sum([haversine_distance(seg.points[i], seg.points[i+1]) for i in range(len(seg.points)-1)])
+            legs.append((dist, None))
+    else:
+        points = [pt for tr in gpx.tracks for seg in tr.segments for pt in seg.points]
+        num_legs = st.number_input("No legs detected. How many legs would you like to split into?", min_value=1, max_value=20, value=5, step=1)
+        legs = split_into_legs(points, num_legs)
 else:
     race_choice = st.selectbox("Or pick a default race distance:", ["Marathon (42.2 km)", "Half Marathon (21.1 km)", "50 km Ultra",
         "100 km Ultra", "50 Mile Ultra (80 km)", "100 Mile Ultra (160 km)"])
-    total_dist = {"Marathon":42.2,"Half":21.1,"50 km":50,"100 km":100,"50 Mile":80,"100 Mile":160}[race_choice.split()[0]]
+    total_dist = {"Marathon":42.2,"Half":21.1,"50":50,"100":100,"80":80,"160":160}[race_choice.split()[0]]
+    legs = [(total_dist, None)]
 
 mode = st.radio("Choose planning feature:", ("Pacing Plan","Advanced Training Plan"))
 if mode == "Pacing Plan":
-    legs = [(total_dist, 0)]
     submode = st.radio("Choose pacing mode:", ("Set target finish time","Set target pace"))
     if submode == "Set target finish time":
         target_time = st.number_input("Target Finish Time (hours)", value=5.0)
@@ -174,6 +197,7 @@ if mode == "Pacing Plan":
             st.table(plan)
             st.success(f"Estimated Total Time: {round(total_time,2)} hours")
 else:
+    total_dist = sum([leg[0] for leg in legs])
     by_mode = st.radio("Plan by:", ("Distance (km)","Time (hours)"))
     by = "km" if by_mode == "Distance (km)" else "hours"
     weeks = st.number_input("Number of weeks to train", min_value=4, max_value=52, value=16, step=1)
