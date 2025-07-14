@@ -14,6 +14,39 @@ def haversine_distance(p1, p2):
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return R * c
 
+def compute_leg_paces_by_time(legs, target_hours):
+    total_distance = sum([leg[0] for leg in legs])
+    flat_pace = (target_hours * 60) / total_distance
+    pacing_plan, total_time = [], 0
+    for idx, (dist, _) in enumerate(legs):
+        adj_pace = flat_pace
+        leg_time = dist * adj_pace
+        total_time += leg_time
+        pacing_plan.append({
+            "Leg": idx+1,
+            "Distance (km)": round(dist,3),
+            "Pace (min/km)": round(adj_pace,2),
+            "Time (h)": round(leg_time/60,2)
+        })
+    scaling = (target_hours*60) / total_time if total_time > 0 else 1
+    for leg in pacing_plan:
+        leg["Pace (min/km)"] = round(leg["Pace (min/km)"]*scaling,2)
+        leg["Time (h)"] = round(leg["Time (h)"]*scaling,2)
+    return pacing_plan, sum([leg["Time (h)"] for leg in pacing_plan])
+
+def compute_leg_times_by_pace(legs, target_pace):
+    pacing_plan, total_time = [], 0
+    for idx, (dist, _) in enumerate(legs):
+        leg_time = dist * target_pace
+        total_time += leg_time
+        pacing_plan.append({
+            "Leg": idx+1,
+            "Distance (km)": round(dist,3),
+            "Pace (min/km)": round(target_pace,2),
+            "Time (h)": round(leg_time/60,2)
+        })
+    return pacing_plan, total_time/60
+
 def round_quarter_hour(hours):
     return round((hours * 4 + 0.9999) // 1) / 4
 
@@ -59,7 +92,6 @@ def generate_advanced_training_plan(total_distance, weeks, days_per_week=5, incl
         long_run_sun = week_volume * 0.25
         remaining_volume = week_volume - (long_run_sat + long_run_sun)
 
-        # rounding
         if by == "hours":
             week_volume = round_quarter_hour(week_volume)
             long_run_sat = round_quarter_hour(long_run_sat)
@@ -114,7 +146,6 @@ def generate_advanced_training_plan(total_distance, weeks, days_per_week=5, incl
 st.title("Ultra Pacing & Advanced Training Plan")
 
 uploaded_file = st.file_uploader("Upload your GPX file", type=["gpx"])
-use_default = False
 total_dist = 0
 
 if uploaded_file is not None:
@@ -122,25 +153,11 @@ if uploaded_file is not None:
     points = [pt for tr in gpx.tracks for seg in tr.segments for pt in seg.points]
     total_dist = sum([haversine_distance(points[i], points[i+1]) for i in range(len(points)-1)])
 else:
-    race_choice = st.selectbox("Or pick a default race distance:",
-        ["Marathon (42.2 km)", "Half Marathon (21.1 km)", "50 km Ultra",
-         "100 km Ultra", "50 Mile Ultra (80 km)", "100 Mile Ultra (160 km)"])
-    if race_choice.startswith("Marathon"):
-        total_dist = 42.2
-    elif race_choice.startswith("Half"):
-        total_dist = 21.1
-    elif race_choice.startswith("50 km"):
-        total_dist = 50
-    elif race_choice.startswith("100 km"):
-        total_dist = 100
-    elif race_choice.startswith("50 Mile"):
-        total_dist = 80
-    elif race_choice.startswith("100 Mile"):
-        total_dist = 160
-    use_default = True
+    race_choice = st.selectbox("Or pick a default race distance:", ["Marathon (42.2 km)", "Half Marathon (21.1 km)", "50 km Ultra",
+        "100 km Ultra", "50 Mile Ultra (80 km)", "100 Mile Ultra (160 km)"])
+    total_dist = {"Marathon":42.2,"Half":21.1,"50 km":50,"100 km":100,"50 Mile":80,"100 Mile":160}[race_choice.split()[0]]
 
 mode = st.radio("Choose planning feature:", ("Pacing Plan","Advanced Training Plan"))
-
 if mode == "Pacing Plan":
     legs = [(total_dist, 0)]
     submode = st.radio("Choose pacing mode:", ("Set target finish time","Set target pace"))
